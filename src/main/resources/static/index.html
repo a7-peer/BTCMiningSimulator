@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Simple Blockchain UI</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 700px;
+            margin: 20px auto;
+            padding: 0 10px;
+        }
+        h1, h2 {
+            text-align: center;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        input[type="text"], input[type="number"] {
+            padding: 8px;
+            margin: 5px 5px 10px 0;
+            width: calc(33% - 12px);
+        }
+        button {
+            padding: 8px 15px;
+            cursor: pointer;
+        }
+        .block {
+            border: 1px solid #aaa;
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            background: #f9f9f9;
+        }
+        .tx-list {
+            margin-left: 20px;
+        }
+        .status {
+            text-align: center;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        #mempool {
+            border: 1px dashed #888;
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            min-height: 50px;
+            background: #fffbea;
+        }
+    </style>
+</head>
+<body>
+
+<h1>Simple Blockchain Explorer</h1>
+
+<h2>Create Transaction</h2>
+<form id="txForm">
+    <input type="text" id="fromAddress" placeholder="From Address" required />
+    <input type="text" id="toAddress" placeholder="To Address" required />
+    <input type="number" id="amount" placeholder="Amount" step="any" required />
+    <button type="submit">Submit Transaction</button>
+</form>
+
+<h2>Pending Transactions (Mempool)</h2>
+<div id="mempool"><p>Loading pending transactions...</p></div>
+
+<button id="mineBtn">Mine Block</button>
+
+<div id="status" class="status"></div>
+
+<h2>Blockchain</h2>
+<div id="blockchain"></div>
+
+<script>
+    const txForm = document.getElementById('txForm');
+    const mineBtn = document.getElementById('mineBtn');
+    const blockchainDiv = document.getElementById('blockchain');
+    const statusDiv = document.getElementById('status');
+    const mempoolDiv = document.getElementById('mempool');
+
+    async function fetchChain() {
+        try {
+            const res = await fetch('/chain');
+            if (!res.ok) throw new Error('Failed to fetch blockchain');
+            const chain = await res.json();
+            displayChain(chain);
+        } catch (err) {
+            blockchainDiv.innerHTML = '<p>Error loading blockchain.</p>';
+            console.error(err);
+        }
+    }
+
+    function displayChain(chain) {
+        blockchainDiv.innerHTML = '';
+        if (chain.length === 0) {
+            blockchainDiv.innerHTML = '<p>No blocks yet.</p>';
+            return;
+        }
+        chain.forEach(block => {
+            const blockDiv = document.createElement('div');
+            blockDiv.className = 'block';
+            blockDiv.innerHTML = `
+                <p><strong>Block #${block.index}</strong></p>
+                <p><strong>Hash:</strong> ${block.hash}</p>
+                <p><strong>Previous Hash:</strong> ${block.previousHash}</p>
+                <p><strong>Nonce:</strong> ${block.nonce}</p>
+                <p><strong>Timestamp:</strong> ${new Date(block.timestamp).toLocaleString()}</p>
+                <p><strong>Transactions:</strong></p>
+                <ul class="tx-list">
+                    ${block.transactions.length > 0
+                ? block.transactions.map(tx => `<li>${tx.fromAddress} → ${tx.toAddress} : ${tx.amount}</li>`).join('')
+                : '<li><em>No transactions</em></li>'
+            }
+                </ul>
+            `;
+            blockchainDiv.appendChild(blockDiv);
+        });
+    }
+
+    async function fetchMempool() {
+        try {
+            const res = await fetch('/mempool');
+            if (!res.ok) throw new Error('Failed to fetch mempool');
+            const mempool = await res.json();
+            displayMempool(mempool);
+        } catch (err) {
+            mempoolDiv.innerHTML = '<p>Error loading pending transactions.</p>';
+            console.error(err);
+        }
+    }
+
+    function displayMempool(mempool) {
+        if (mempool.length === 0) {
+            mempoolDiv.innerHTML = '<p>No pending transactions.</p>';
+            return;
+        }
+        mempoolDiv.innerHTML = '<ul>' + mempool.map(tx =>
+            `<li>${tx.fromAddress} → ${tx.toAddress} : ${tx.amount}</li>`
+        ).join('') + '</ul>';
+    }
+
+    txForm.addEventListener('submit', async e => {
+        e.preventDefault();
+        const fromAddress = document.getElementById('fromAddress').value.trim();
+        const toAddress = document.getElementById('toAddress').value.trim();
+        const amount = parseFloat(document.getElementById('amount').value);
+
+        if (!fromAddress || !toAddress || isNaN(amount)) {
+            alert('Please fill all fields correctly');
+            return;
+        }
+
+        statusDiv.textContent = 'Submitting transaction...';
+
+        try {
+            const res = await fetch('/transaction', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fromAddress, toAddress, amount }),
+            });
+            if (!res.ok) throw new Error('Failed to create transaction');
+            statusDiv.textContent = 'Transaction submitted!';
+            txForm.reset();
+            await fetchMempool();
+            await fetchChain();
+        } catch (err) {
+            statusDiv.textContent = 'Error submitting transaction.';
+            console.error(err);
+        }
+    });
+
+    mineBtn.addEventListener('click', async () => {
+        statusDiv.textContent = 'Mining block...';
+        try {
+            const res = await fetch('/mine', { method: 'POST' });
+            if (!res.ok) {
+                const errorMsg = await res.text();
+                throw new Error(errorMsg || 'No transactions to mine or server error');
+            }
+            const minedBlock = await res.json();
+            statusDiv.textContent = `Block #${minedBlock.index} mined!`;
+            await fetchChain();
+            await fetchMempool();
+        } catch (err) {
+            statusDiv.textContent = 'Error mining block: ' + err.message;
+            console.error(err);
+        }
+    });
+
+    // Initial load
+    fetchChain();
+    fetchMempool();
+</script>
+
+</body>
+</html>
